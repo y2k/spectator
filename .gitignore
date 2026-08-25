@@ -1,9 +1,6 @@
 .dev.vars
 .DS_Store
 /.agents/skills/*
-!/.agents/skills/telegram-bot-api/
-!/.agents/skills/telegram-bot-api/**
-/.agents/skills/telegram-bot-api/scripts/__pycache__/
 /.opencode/commands
 /.vscode/
 /.wrangler/.wrangler/

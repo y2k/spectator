@@ -211,6 +211,12 @@
       "skillPath": "skills/productivity/teach/SKILL.md",
       "computedHash": "b8a69574c7a019bed84e84313dc8bf02e1d1bf925ba43057d433217c63863206"
     },
+    "telegram-bot-api": {
+      "source": "y2k/skill-telegram-bot-api",
+      "sourceType": "github",
+      "skillPath": "skills/telegram-bot-api/SKILL.md",
+      "computedHash": "62ae31ddff0b8420a8a720febc5e48947be4a4305ee516696b9a94c5642ac8ae"
+    },
     "to-questionnaire": {
       "source": "mattpocock/skills",
       "sourceType": "github",

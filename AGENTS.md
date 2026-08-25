@@ -4,7 +4,7 @@ The `l2yk` compiler source code is located in `~/Projects/language`.
 
 Create issues for the `l2yk` compiler in https://github.com/y2k/language.
 
-# Engineering Approach
+## Engineering Approach
 
 - Implement only the behavior explicitly required now. Do not add speculative features, abstractions, configuration, extension points, or architecture for possible future needs.
 - Prefer deleting code, reusing existing code, the standard library, and native platform features. Choose the smallest clear change that works.
@@ -12,6 +12,20 @@ Create issues for the `l2yk` compiler in https://github.com/y2k/language.
 - Do not introduce dependencies or boilerplate when a direct implementation is sufficient.
 - Mark an intentional shortcut with a `ponytail:` comment that states its limit and when it should be revisited.
 
-#
+## Code
 
 - After completing code changes, run the relevant tests.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Uses the default five canonical triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Uses the single-context layout. See `docs/agents/domain.md`.

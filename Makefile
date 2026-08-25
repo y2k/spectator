@@ -19,5 +19,4 @@ clean:
 
 .PHONY: run
 run:
-	@ cd $(WRANGLER_DIR)
-	@ wrangler dev
+	@ cd $(WRANGLER_DIR) && wrangler dev
