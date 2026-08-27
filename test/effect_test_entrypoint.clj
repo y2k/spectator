@@ -6,13 +6,16 @@
            (let [effects (Array.)]
              (main/with_fetch
               (fn [url props]
-                (.push effects {:type "fetch" :url url :props props}))
+                (.push effects {:type "fetch" :url url :props props})
+                (.resolve Promise nil))
               (fn []
-                (let [response (main/handle_fetch request env ctx)]
-                  (.then
-                   (.text response)
-                   (fn [body]
-                     (Response.
-                      (JSON.stringify {:effects effects
-                                       :response body})
-                      {:headers {"content-type" "application/json"}}))))))))})
+                (.then
+                 (.resolve Promise (main/handle-fetch request env))
+                 (fn [response]
+                   (.then
+                    (.text response)
+                    (fn [body]
+                      (Response.
+                       (JSON.stringify {:effects effects
+                                        :response body})
+                       {:headers {"content-type" "application/json"}})))))))))})
