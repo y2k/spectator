@@ -32,9 +32,167 @@
                   (get body "effects")
                   (JSON.parse
                    (JSON.stringify
+                     [{:type "fetch"
+                       :url "https://api.telegram.org/bottest-token/sendMessage"
+                      :props {:method "POST"
+                              :headers {"content-type" "application/json"}
+                              :body (JSON.stringify {:chat_id "test-chat"
+                                                      :text "OK"})}}])))))))))
+
+(t/test "worker stores /add task for the Telegram user"
+          (fn []
+            (.then
+             (.fetch server "/"
+                    {:method "POST"
+                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                     :body (JSON.stringify {:message {:text "/add Buy milk"
+                                                      :chat {:id "chat-1"}
+                                                      :from {:id "user-1"}}})})
+            (fn [response]
+              (.then
+               (.json response)
+               (fn [body]
+                 (assert/deepStrictEqual
+                  (get body "effects")
+                  (JSON.parse
+                   (JSON.stringify
+                    [{:type "d1.prepare"
+                      :sql "INSERT INTO tasks (telegram_user_id, text) VALUES (?1, ?2)"}
+                     {:type "d1.bind" :params ["user-1" "Buy milk"]}
+                     {:type "fetch"
+                      :url "https://api.telegram.org/bottest-token/sendMessage"
+                      :props {:method "POST"
+                              :headers {"content-type" "application/json"}
+                              :body (JSON.stringify {:chat_id "chat-1"
+                                                      :text "Задача добавлена."})}}])))))))))
+
+(t/test "worker lists tasks for the Telegram user"
+          (fn []
+            (.then
+             (.fetch server "/"
+                    {:method "POST"
+                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                     :body (JSON.stringify {:message {:text "/tasks"
+                                                      :chat {:id "chat-1"}
+                                                      :from {:id "user-1"}}})})
+            (fn [response]
+              (.then
+               (.json response)
+               (fn [body]
+                 (assert/deepStrictEqual
+                  (get body "effects")
+                  (JSON.parse
+                   (JSON.stringify
+                    [{:type "d1.prepare"
+                      :sql "SELECT text FROM tasks WHERE telegram_user_id = ?1 ORDER BY id"}
+                     {:type "d1.bind" :params ["user-1"]}
+                     {:type "fetch"
+                      :url "https://api.telegram.org/bottest-token/sendMessage"
+                      :props {:method "POST"
+                              :headers {"content-type" "application/json"}
+                              :body (JSON.stringify {:chat_id "chat-1"
+                                                     :text "1. first\n2. second"})}}])))))))))
+
+(t/test "worker explains how to use empty /add"
+          (fn []
+            (.then
+             (.fetch server "/"
+                    {:method "POST"
+                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                     :body (JSON.stringify {:message {:text "/add"
+                                                      :chat {:id "chat-1"}
+                                                      :from {:id "user-1"}}})})
+            (fn [response]
+              (.then
+               (.json response)
+               (fn [body]
+                 (assert/deepStrictEqual
+                  (get body "effects")
+                  (JSON.parse
+                   (JSON.stringify
                     [{:type "fetch"
                       :url "https://api.telegram.org/bottest-token/sendMessage"
                       :props {:method "POST"
                               :headers {"content-type" "application/json"}
-                              :body (JSON.stringify {:chat_id "test-chat"
-                                                     :text "OK"})}}])))))))))
+                              :body (JSON.stringify {:chat_id "chat-1"
+                                                     :text "Укажите текст задачи: /add <текст>"})}}])))))))))
+
+(t/test "worker does not store whitespace-only /add"
+          (fn []
+            (.then
+             (.fetch server "/"
+                    {:method "POST"
+                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                     :body (JSON.stringify {:message {:text "/add   "
+                                                      :chat {:id "chat-1"}
+                                                      :from {:id "user-1"}}})})
+            (fn [response]
+              (.then
+               (.json response)
+               (fn [body]
+                 (assert/deepStrictEqual
+                  (get body "effects")
+                  (JSON.parse
+                   (JSON.stringify
+                    [{:type "fetch"
+                      :url "https://api.telegram.org/bottest-token/sendMessage"
+                      :props {:method "POST"
+                              :headers {"content-type" "application/json"}
+                              :body (JSON.stringify {:chat_id "chat-1"
+                                                     :text "Укажите текст задачи: /add <текст>"})}}])))))))))
+
+(t/test "worker reports no tasks for an empty list"
+          (fn []
+            (.then
+             (.fetch server "/"
+                    {:method "POST"
+                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                     :body (JSON.stringify {:message {:text "/tasks"
+                                                      :chat {:id "chat-1"}
+                                                      :from {:id "empty-user"}}})})
+            (fn [response]
+              (.then
+               (.json response)
+               (fn [body]
+                 (assert/deepStrictEqual
+                  (get body "effects")
+                  (JSON.parse
+                   (JSON.stringify
+                    [{:type "d1.prepare"
+                      :sql "SELECT text FROM tasks WHERE telegram_user_id = ?1 ORDER BY id"}
+                     {:type "d1.bind" :params ["empty-user"]}
+                     {:type "fetch"
+                      :url "https://api.telegram.org/bottest-token/sendMessage"
+                      :props {:method "POST"
+                              :headers {"content-type" "application/json"}
+                              :body (JSON.stringify {:chat_id "chat-1"
+                                                     :text "Задач пока нет."})}}])))))))))
+
+(t/test "worker ignores non-text Telegram updates"
+          (fn []
+            (.then
+             (.fetch server "/"
+                    {:method "POST"
+                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                     :body (JSON.stringify {:message {:chat {:id "chat-1"}
+                                                      :from {:id "user-1"}
+                                                      :sticker {:emoji "!"}}})})
+            (fn [response]
+              (.then
+               (.json response)
+                (fn [body]
+                 (assert/deepStrictEqual (get body "effects") [])))))))
+
+(t/test "worker ignores task commands without a Telegram user ID"
+          (fn []
+            (.then
+             (.fetch server "/"
+                    {:method "POST"
+                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                     :body (JSON.stringify {:message {:text "/add Buy milk"
+                                                      :chat {:id "chat-1"}}})})
+            (fn [response]
+              (.then
+               (.json response)
+               (fn [body]
+                 (assert/deepStrictEqual (get body "effects") [])))))))

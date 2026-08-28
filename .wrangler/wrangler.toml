@@ -1,7 +1,7 @@
 name = "spectator"
 main = "bin/src/main.js"
 compatibility_date = "2026-08-24"
-# compatibility_flags = ["nodejs_compat"]
+compatibility_flags = ["nodejs_compat"]
 
 [build]
 command = "cd .. && make build"
@@ -10,3 +10,9 @@ watch_dir = ["../src"]
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+[[d1_databases]]
+binding = "TASKS"
+database_name = "spectator-tasks"
+database_id = "97011597-adcf-497c-927a-1df93724f7e6"
+migrations_dir = "../migrations"

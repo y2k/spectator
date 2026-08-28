@@ -17,8 +17,8 @@ build:
 clean:
 	@ rm -rf $(BIN_DIR)
 
-.PHONY: dev
-dev:
+.PHONY: run
+run:
 	@ set -eu; \
 	set -a; . $(WRANGLER_DIR)/.dev.vars; set +a; \
 	: "$${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN must be set}"; \
