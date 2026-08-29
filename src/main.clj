@@ -16,42 +16,71 @@
     :headers {"content-type" "application/json"}
     :body (JSON.stringify {:chat_id chat-id :text text})}))
 
+(defn handle-scheduled [env]
+  (.then
+   (.all
+    (.prepare (get env "TASKS") "SELECT DISTINCT telegram_user_id FROM tasks ORDER BY telegram_user_id"))
+   (fn [result]
+     (let [users (.map (get result "results") (fn [owner] (get owner "telegram_user_id")))]
+       (globalThis.console.log
+        (JSON.stringify {:event "scheduled_users" :users users :count (count users)}))))))
+
 (defn handle-fetch [request env]
   (if (= "POST" (get request "method"))
     (let [secret (:TELEGRAM_WEBHOOK_SECRET env)]
       (if (and secret
                (= secret (.get (get request "headers") "X-Telegram-Bot-Api-Secret-Token")))
         (.then
-          (.json request)
-          (fn [update]
-            (let [message (get update "message")
-                  text (if message (get message "text") nil)
-                  chat (if message (get message "chat") nil)
-                  sender (if message (get message "from") nil)
-                  chat-id (if chat (get chat "id") nil)
-                  user-id (if sender (get sender "id") nil)]
-               (if (= "/start" text)
-                 (.then (send-message env chat-id "OK") (fn [] (Response. "OK")))
-                 (if (or (= "/add" text)
-                         (and text (.startsWith text "/add ")
-                              (= "" (.trim (.slice text 4)))))
+         (.json request)
+         (fn [update]
+           (let [message (get update "message")
+                 text (if message (get message "text") nil)
+                 chat (if message (get message "chat") nil)
+                 sender (if message (get message "from") nil)
+                 chat-id (if chat (get chat "id") nil)
+                 user-id (if sender (get sender "id") nil)]
+             (if (= "/start" text)
+               (.then
+                (send-message env chat-id "Доступные команды:\n/add <текст> - добавить задачу\n/tasks - показать задачи\n/delete <номер> - удалить задачу")
+                (fn [] (Response. "OK")))
+               (if (or (= "/delete" text)
+                       (= "/add" text)
+                       (and text (.startsWith text "/add ")
+                            (= "" (.trim (.slice text 4)))))
+                 (.then
+                  (send-message env chat-id (if (= "/delete" text) "Использование: /delete <номер>" "Укажите текст задачи: /add <текст>"))
+                  (fn [] (Response. "OK")))
+                 (if (and user-id (= "/tasks" text))
                    (.then
-                    (send-message env chat-id "Укажите текст задачи: /add <текст>")
-                    (fn [] (Response. "OK")))
-                   (if (and user-id (= "/tasks" text))
-                     (.then
-                      (.all
-                      (.bind
-                        (.prepare (get env "TASKS") "SELECT text FROM tasks WHERE telegram_user_id = ?1 ORDER BY id")
-                        user-id))
-                      (fn [result]
-                        (let [tasks (.join
-                                     (.map (get result "results")
-                                           (fn [task index] (str (+ index 1) ". " (get task "text"))))
-                                     "\n")]
-                          (.then
-                           (send-message env chat-id (if (= "" tasks) "Задач пока нет." tasks))
-                           (fn [] (Response. "OK"))))))
+                    (.all
+                     (.bind
+                      (.prepare (get env "TASKS") "SELECT text FROM tasks WHERE telegram_user_id = ?1 ORDER BY id")
+                      user-id))
+                    (fn [result]
+                      (let [tasks (.join
+                                   (.map (get result "results")
+                                         (fn [task index] (str (+ index 1) ". " (get task "text"))))
+                                   "\n")]
+                        (.then
+                         (send-message env chat-id (if (= "" tasks) "Задач пока нет." tasks))
+                         (fn [] (Response. "OK"))))))
+                   (if (and user-id text (.startsWith text "/delete "))
+                     (let [task-number (Number (.trim (.slice text 8)))]
+                       (if (and (.isInteger Number task-number)
+                                (> task-number 0))
+                         (.then
+                          (.all
+                           (.bind
+                            (.prepare (get env "TASKS") "DELETE FROM tasks WHERE id = (SELECT id FROM tasks WHERE telegram_user_id = ?1 ORDER BY id LIMIT 1 OFFSET ?2) AND telegram_user_id = ?1 RETURNING id")
+                            user-id
+                            (- task-number 1)))
+                          (fn [result]
+                            (.then
+                             (send-message env chat-id (if (= 0 (count (get result "results"))) "Задача не найдена." "Задача удалена."))
+                             (fn [] (Response. "OK")))))
+                         (.then
+                          (send-message env chat-id "Использование: /delete <номер>")
+                          (fn [] (Response. "OK")))))
                      (if (and user-id text (.startsWith text "/add "))
                        (.then
                         (.run
@@ -61,12 +90,14 @@
                           (.trim (.slice text 4))))
                         (fn []
                           (.then (send-message env chat-id "Задача добавлена.") (fn [] (Response. "OK")))))
-                       (Response. "OK"))))))))
-         (Response. "Unauthorized" {:status 401})))
+                       (Response. "OK")))))))))
+        (Response. "Unauthorized" {:status 401})))
     (Response. "OK")))
 
 (export-default
  {:fetch (fn [request env ctx]
            (with-fetch
              (fn [url options] (globalThis.fetch url options))
-             (fn [] (handle-fetch request env))))})
+             (fn [] (handle-fetch request env))))
+  :scheduled (fn [controller env ctx]
+               (handle-scheduled env))})
