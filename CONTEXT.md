@@ -1,6 +1,6 @@
 # Spectator
 
-Spectator is a Worker that acknowledges HTTP requests and reports each invocation to Telegram.
+Spectator is a Telegram bot that watches public Telegram channels and notifies Task owners about new Channel Posts.
 
 ## Language
 
@@ -13,9 +13,17 @@ A checked-in local copy of the official Telegram Bot API reference used by the p
 _Avoid_: SDK documentation, framework guide
 
 **Task**:
-A text entry stored by the bot and owned by one Telegram user ID. Only its owner can list or delete it.
-_Avoid_: team task, shared task
+A public Telegram channel link stored by the bot and owned by one Telegram user ID. It watches for Channel Posts published after it was added; only its owner can list or delete it.
+_Avoid_: text task, team task, shared task, Channel Task
 
 **Task owner**:
 A Telegram user ID that owns at least one stored Task.
 _Avoid_: User, bot user
+
+**Channel Post**:
+A publication made by a Telegram channel. Later edits, deletion, and comments do not create a new Channel Post.
+_Avoid_: Telegram message, update
+
+**Channel notification**:
+A Telegram message sent to a Task owner when Spectator observes a new Channel Post. Delivery is periodic and may occur more than once.
+_Avoid_: real-time alert, exactly-once notification

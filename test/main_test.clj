@@ -38,18 +38,18 @@
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "test-chat"
                                                     :text "Доступные команды:
-/add <текст> - добавить задачу
-/tasks - показать задачи
-/delete <номер> - удалить задачу"})}}])))))))))
+/add https://t.me/<канал> - добавить канал
+/tasks - показать каналы
+/delete <номер> - удалить канал"})}}])))))))))
 
-(t/test "worker stores /add task for the Telegram user"
+(t/test "worker stores a Telegram channel with its latest post cursor"
         (fn []
           (.then
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/add Buy milk"
-                                                     :chat {:id "chat-1"}
+                    :body (JSON.stringify {:message {:text "/add https://t.me/Serbia"
+                                                     :chat {:id "chat-1" :type "private"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
              (.then
@@ -59,30 +59,147 @@
                  (get body "effects")
                  (JSON.parse
                   (JSON.stringify
-                   [{:type "d1.prepare"
-                     :sql "INSERT INTO tasks (telegram_user_id, text) VALUES (?1, ?2)"}
-                    {:type "d1.bind" :params ["user-1" "Buy milk"]}
+                   [{:type "fetch"
+                     :url "https://t.me/s/serbia"
+                     :props {}}
+                    {:type "d1.prepare"
+                     :sql "INSERT OR IGNORE INTO tasks (telegram_user_id, text, cursor) VALUES (?1, ?2, ?3) RETURNING id"}
+                    {:type "d1.bind" :params ["user-1" "https://t.me/serbia" 9]}
                     {:type "fetch"
                      :url "https://api.telegram.org/bottest-token/sendMessage"
                      :props {:method "POST"
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "chat-1"
-                                                    :text "Задача добавлена."})}}])))))))))
+                                                    :text "Канал добавлен."})}}])))))))))
 
-(t/test "scheduled handler logs task owners"
+(t/test "worker rejects non-Telegram tasks in a private chat"
+        (fn []
+          (.then
+           (.fetch server "/"
+                   {:method "POST"
+                    :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                    :body (JSON.stringify {:message {:text "/add Buy milk"
+                                                     :chat {:id "chat-1" :type "private"}
+                                                     :from {:id "user-1"}}})})
+           (fn [response]
+             (.then
+              (.json response)
+              (fn [body]
+                (assert/deepStrictEqual
+                 (get body "effects")
+                 (JSON.parse
+                  (JSON.stringify
+                   [{:type "fetch"
+                     :url "https://api.telegram.org/bottest-token/sendMessage"
+                     :props {:method "POST"
+                             :headers {"content-type" "application/json"}
+                             :body (JSON.stringify {:chat_id "chat-1"
+                                                    :text "Поддерживается только ссылка вида https://t.me/<канал>."})}}])))))))))
+
+(t/test "worker rejects an unreadable Telegram channel"
+        (fn []
+          (.then
+           (.fetch server "/"
+                   {:method "POST"
+                    :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                    :body (JSON.stringify {:message {:text "/add https://t.me/broken"
+                                                     :chat {:id "chat-1" :type "private"}
+                                                     :from {:id "user-1"}}})})
+           (fn [response]
+             (.then
+              (.json response)
+              (fn [body]
+                (assert/deepStrictEqual
+                 (get body "effects")
+                 (JSON.parse
+                  (JSON.stringify
+                   [{:type "fetch" :url "https://t.me/s/broken" :props {}}
+                    {:type "fetch"
+                     :url "https://api.telegram.org/bottest-token/sendMessage"
+                     :props {:method "POST"
+                             :headers {"content-type" "application/json"}
+                             :body (JSON.stringify {:chat_id "chat-1"
+                                                    :text "Не удалось прочитать Telegram-канал."})}}])))))))))
+
+(t/test "worker ignores /add outside a private chat"
+        (fn []
+          (.then
+           (.fetch server "/"
+                   {:method "POST"
+                    :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                    :body (JSON.stringify {:message {:text "/add https://t.me/serbia"
+                                                     :chat {:id "group-1" :type "group"}
+                                                     :from {:id "user-1"}}})})
+           (fn [response]
+             (.then
+              (.json response)
+              (fn [body]
+                (assert/deepStrictEqual (get body "effects") [])))))))
+
+(t/test "worker reports a duplicate lowercased channel"
+        (fn []
+          (.then
+           (.fetch server "/"
+                   {:method "POST"
+                    :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                    :body (JSON.stringify {:message {:text "/add https://t.me/Serbia"
+                                                     :chat {:id "duplicate-user" :type "private"}
+                                                     :from {:id "duplicate-user"}}})})
+           (fn [response]
+             (.then
+              (.json response)
+              (fn [body]
+                (assert/equal
+                 (get
+                  (JSON.parse (get (get (get (get body "effects") 3) "props") "body"))
+                  "text")
+                 "Канал уже добавлен.")))))))
+
+(t/test "scheduled handler advances ordered posts and isolates failures"
         (fn []
           (.clearLogs server)
           (.then
            (.scheduled (.getWorker server) {:cron "* * * * *"})
            (fn []
-             (assert/equal
-              (get
-               (.find (.getLogs server)
-                      (fn [log] (= "log" (get log "level"))))
-               "message")
-              (JSON.stringify {:event "scheduled_users"
-                               :users ["user-1" "user-2"]
-                               :count 2}))))))
+             (let [logs (.getLogs server)
+                   log (.find logs
+                              (fn [log]
+                                (and (= "log" (get log "level"))
+                                     (.includes (get log "message") "scheduled_effects"))))
+                   effects (get (JSON.parse (get log "message")) "effects")]
+               (assert/deepStrictEqual
+                effects
+                (JSON.parse
+                 (JSON.stringify
+                  [{:type "d1.prepare" :sql "SELECT id, telegram_user_id, text, cursor FROM tasks ORDER BY id"}
+                   {:type "fetch" :url "https://t.me/s/serbia?after=10" :props {}}
+                   {:type "fetch"
+                    :url "https://api.telegram.org/bottest-token/sendMessage"
+                    :props {:method "POST"
+                            :headers {"content-type" "application/json"}
+                            :body (JSON.stringify {:chat_id "user-1" :text "https://t.me/serbia/11"})}}
+                   {:type "d1.prepare" :sql "UPDATE tasks SET cursor = ?1 WHERE id = ?2 AND cursor < ?1"}
+                   {:type "d1.bind" :params [11 1]}
+                   {:type "fetch"
+                    :url "https://api.telegram.org/bottest-token/sendMessage"
+                    :props {:method "POST"
+                            :headers {"content-type" "application/json"}
+                            :body (JSON.stringify {:chat_id "user-1" :text "https://t.me/serbia/13"})}}
+                   {:type "d1.prepare" :sql "UPDATE tasks SET cursor = ?1 WHERE id = ?2 AND cursor < ?1"}
+                   {:type "d1.bind" :params [13 1]}
+                   {:type "fetch" :url "https://t.me/s/broken?after=20" :props {}}
+                   {:type "fetch" :url "https://t.me/s/cursorfail?after=30" :props {}}
+                   {:type "fetch"
+                    :url "https://api.telegram.org/bottest-token/sendMessage"
+                    :props {:method "POST"
+                            :headers {"content-type" "application/json"}
+                            :body (JSON.stringify {:chat_id "user-3" :text "https://t.me/cursorfail/31"})}}
+                   {:type "d1.prepare" :sql "UPDATE tasks SET cursor = ?1 WHERE id = ?2 AND cursor < ?1"}
+                   {:type "d1.bind" :params [31 3]}
+                   {:type "fetch" :url "https://t.me/s/quiet?after=40" :props {}}])))
+               (assert/equal
+                (count (.filter logs (fn [log] (= "error" (get log "level")))))
+                3))))))
 
 (t/test "worker lists tasks for the Telegram user"
         (fn []
@@ -244,7 +361,7 @@
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
                     :body (JSON.stringify {:message {:text "/add"
-                                                     :chat {:id "chat-1"}
+                                                     :chat {:id "chat-1" :type "private"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
              (.then
@@ -259,7 +376,7 @@
                      :props {:method "POST"
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "chat-1"
-                                                    :text "Укажите текст задачи: /add <текст>"})}}])))))))))
+                                                    :text "Укажите ссылку: /add https://t.me/<канал>"})}}])))))))))
 
 (t/test "worker does not store whitespace-only /add"
         (fn []
@@ -268,7 +385,7 @@
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
                     :body (JSON.stringify {:message {:text "/add   "
-                                                     :chat {:id "chat-1"}
+                                                     :chat {:id "chat-1" :type "private"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
              (.then
@@ -283,7 +400,7 @@
                      :props {:method "POST"
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "chat-1"
-                                                    :text "Укажите текст задачи: /add <текст>"})}}])))))))))
+                                                    :text "Укажите ссылку: /add https://t.me/<канал>"})}}])))))))))
 
 (t/test "worker reports no tasks for an empty list"
         (fn []

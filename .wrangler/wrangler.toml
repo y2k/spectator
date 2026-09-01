@@ -11,6 +11,9 @@ watch_dir = ["../src"]
 enabled = true
 head_sampling_rate = 1
 
+[triggers]
+crons = ["* * * * *"]
+
 [[d1_databases]]
 binding = "TASKS"
 database_name = "spectator-tasks"
