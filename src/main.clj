@@ -1,5 +1,6 @@
 (ns main
-  (:require ["node:async_hooks" :as async_hooks]))
+  (:require ["node:async_hooks" :as async_hooks])
+  (:require [db :as db]))
 
 (def- fetch-fx (async_hooks/AsyncLocalStorage.))
 
@@ -67,12 +68,10 @@
                     :stage stage
                     :error (str error)})))
 
-(defn- update-cursor [env task post-id]
-  (.run
-   (.bind
-    (.prepare (get env "TASKS") "UPDATE tasks SET cursor = ?1 WHERE id = ?2 AND cursor < ?1")
-    post-id
-    (get task "id"))))
+(defn- update-cursor [task post-id]
+  (db/run
+   "UPDATE tasks SET cursor = ?1 WHERE id = ?2 AND cursor < ?1"
+   [post-id (get task "id")]))
 
 (defn- notify-post [env task post-id]
   (.then
@@ -83,7 +82,7 @@
      (str (get task "text") (if (.endsWith (get task "text") "/") "" "/") post-id))
     (fn [error]
       (log-task-error task "send" error)))
-   (fn [] (update-cursor env task post-id))))
+   (fn [] (update-cursor task post-id))))
 
 (defn- process-task [env task]
   (let [task-channel (channel (get task "text"))]
@@ -102,7 +101,9 @@
 ;; ponytail: tasks run sequentially; batch them only when Worker limits are measured.
 (defn handle-scheduled [env]
   (.then
-   (.all (.prepare (get env "TASKS") "SELECT id, telegram_user_id, text, cursor FROM tasks ORDER BY id"))
+   (db/all
+    "SELECT id, telegram_user_id, text, cursor FROM tasks ORDER BY id"
+    [])
    (fn [result]
      (reduce
       (fn [promise task]
@@ -147,10 +148,9 @@
                      (Response. "OK"))
                    (if (and user-id (= "/tasks" text))
                      (.then
-                      (.all
-                       (.bind
-                        (.prepare (get env "TASKS") "SELECT text FROM tasks WHERE telegram_user_id = ?1 ORDER BY id")
-                        user-id))
+                      (db/all
+                       "SELECT text FROM tasks WHERE telegram_user_id = ?1 ORDER BY id"
+                       [user-id])
                       (fn [result]
                         (let [tasks (.join
                                      (.map (get result "results")
@@ -164,11 +164,9 @@
                          (if (and (.isInteger Number task-number)
                                   (> task-number 0))
                            (.then
-                            (.all
-                             (.bind
-                              (.prepare (get env "TASKS") "DELETE FROM tasks WHERE id = (SELECT id FROM tasks WHERE telegram_user_id = ?1 ORDER BY id LIMIT 1 OFFSET ?2) AND telegram_user_id = ?1 RETURNING id")
-                              user-id
-                              (- task-number 1)))
+                            (db/all
+                             "DELETE FROM tasks WHERE id = (SELECT id FROM tasks WHERE telegram_user_id = ?1 ORDER BY id LIMIT 1 OFFSET ?2) AND telegram_user_id = ?1 RETURNING id"
+                             [user-id (- task-number 1)])
                             (fn [result]
                               (.then
                                (send-message env chat-id (if (= 0 (count (get result "results"))) "Задача не найдена." "Задача удалена."))
@@ -191,12 +189,9 @@
                                 (fn [ids]
                                   (if ids
                                     (.then
-                                     (.all
-                                      (.bind
-                                       (.prepare (get env "TASKS") "INSERT OR IGNORE INTO tasks (telegram_user_id, text, cursor) VALUES (?1, ?2, ?3) RETURNING id")
-                                       user-id
-                                       (get task-channel "text")
-                                       (latest-id ids)))
+                                     (db/all
+                                      "INSERT OR IGNORE INTO tasks (telegram_user_id, text, cursor) VALUES (?1, ?2, ?3) RETURNING id"
+                                      [user-id (get task-channel "text") (latest-id ids)])
                                      (fn [result]
                                        (.then
                                         (send-message env chat-id (if (= 0 (count (get result "results"))) "Канал уже добавлен." "Канал добавлен."))
@@ -216,8 +211,14 @@
  {:fetch (fn [request env ctx]
            (with-fetch
              (fn [url options] (globalThis.fetch url options))
-             (fn [] (handle-fetch request env))))
+             (fn []
+               (db/with-db
+                 (get env "TASKS")
+                 (fn [] (handle-fetch request env))))))
   :scheduled (fn [controller env ctx]
                (with-fetch
                  (fn [url options] (globalThis.fetch url options))
-                 (fn [] (handle-scheduled env))))})
+                 (fn []
+                   (db/with-db
+                     (get env "TASKS")
+                     (fn [] (handle-scheduled env))))))})

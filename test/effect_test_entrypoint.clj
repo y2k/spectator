@@ -1,4 +1,5 @@
 (ns effect-test-entrypoint
+  (:require [db :as db])
   (:require [main :as main]))
 
 (defn- database [effects]
@@ -61,23 +62,29 @@
              (main/with_fetch
               (external-fetch effects)
               (fn []
-                (.then
-                 (.resolve Promise (main/handle-fetch request (Object.assign {} env {"TASKS" (database effects)})))
-                 (fn [response]
+                (db/with_db
+                 (database effects)
+                 (fn []
                    (.then
-                    (.text response)
-                    (fn [body]
-                      (Response.
-                       (JSON.stringify {:effects effects
-                                        :response body})
-                       {:headers {"content-type" "application/json"}})))))))))
+                    (.resolve Promise (main/handle-fetch request env))
+                    (fn [response]
+                      (.then
+                       (.text response)
+                       (fn [body]
+                         (Response.
+                          (JSON.stringify {:effects effects
+                                           :response body})
+                          {:headers {"content-type" "application/json"}})))))))))))
   :scheduled (fn [controller env ctx]
                (let [effects (Array.)]
                  (main/with_fetch
                   (external-fetch effects)
                   (fn []
-                    (.then
-                     (main/handle-scheduled (Object.assign {} env {"TASKS" (database effects)}))
+                    (db/with_db
+                     (database effects)
                      (fn []
-                       (globalThis.console.log
-                        (JSON.stringify {:event "scheduled_effects" :effects effects}))))))))})
+                       (.then
+                        (main/handle-scheduled env)
+                        (fn []
+                          (globalThis.console.log
+                           (JSON.stringify {:event "scheduled_effects" :effects effects}))))))))))})
