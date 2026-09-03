@@ -1,6 +1,7 @@
 (ns effect-test-entrypoint
   (:require [db :as db])
-  (:require [main :as main]))
+  (:require [main :as main])
+  (:require [telegram :as telegram]))
 
 (defn- database [effects]
   {:prepare (fn [sql]
@@ -59,7 +60,7 @@
 (export-default
  {:fetch (fn [request env ctx]
            (let [effects (Array.)]
-             (main/with_fetch
+             (telegram/with_fetch
               (external-fetch effects)
               (fn []
                 (db/with_db
@@ -77,7 +78,7 @@
                           {:headers {"content-type" "application/json"}})))))))))))
   :scheduled (fn [controller env ctx]
                (let [effects (Array.)]
-                 (main/with_fetch
+                 (telegram/with_fetch
                   (external-fetch effects)
                   (fn []
                     (db/with_db
