@@ -63,19 +63,18 @@
 
 (defn handle-fetch [request env]
   (if (= "POST" (get request "method"))
-    (let [secret (:TELEGRAM_WEBHOOK_SECRET env)]
-      (if (and secret
-               (= secret (.get (get request "headers") "X-Telegram-Bot-Api-Secret-Token")))
-        (.then
-         (.json request)
-         (fn [update]
-           (let [message (get update "message")]
-             (or (start/handle env message)
-                 (delete_cmd/handle env message)
-                 (add/handle env message)
-                 (tasks/handle env message)
-                 (Response. "OK")))))
-        (Response. "Unauthorized" {:status 401})))
+    (if-let [secret (:TELEGRAM_WEBHOOK_SECRET env)
+             authorized (= secret (.get (get request "headers") "X-Telegram-Bot-Api-Secret-Token"))]
+      (.then
+       (.json request)
+       (fn [update]
+         (let [message (get update "message")]
+           (or (start/handle env message)
+               (delete_cmd/handle env message)
+               (add/handle env message)
+               (tasks/handle env message)
+               (Response. "OK")))))
+      (Response. "Unauthorized" {:status 401}))
     (Response. "OK")))
 
 (export-default

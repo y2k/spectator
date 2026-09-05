@@ -10,21 +10,20 @@
   ((.getStore fetch-fx) url options))
 
 (defn channel [text]
-  (let [canonical (if text (.toLowerCase (.trim text)) "")
-        match (.match canonical (RegExp. "^https://t[.]me/([a-z0-9_]+)/?$"))]
-    (if match {:text canonical :username (get match 1)} nil)))
+  (if-let [canonical (if text (.toLowerCase (.trim text)) "")
+           match (.match canonical (RegExp. "^https://t[.]me/([a-z0-9_]+)/?$"))]
+    {:text canonical :username (get match 1)}))
 
 (defn preview-url [channel]
   (str "https://t.me/s/" (get channel "username")))
 
 ;; ponytail: Telegram does not document preview markup; replace this regex only when it breaks.
 (defn- post-ids [html]
-  (let [matches (.match html (RegExp. "data-post=[^/]+/[0-9]+" "g"))]
-    (if matches
-      (.map matches
-            (fn [match]
-              (Number (.slice match (+ 1 (.lastIndexOf match "/"))))))
-      (Array.))))
+  (if-let [matches (.match html (RegExp. "data-post=[^/]+/[0-9]+" "g"))]
+    (.map matches
+          (fn [match]
+            (Number (.slice match (+ 1 (.lastIndexOf match "/"))))))
+    (Array.)))
 
 (defn fetch-post-ids [url require-post]
   (.then
