@@ -13,16 +13,15 @@
 (defn handle [env message]
   (if-let [text (if message (get message "text") nil)
            command (or (= "/add" text) (.startsWith text "/add "))]
-    (let [chat (get message "chat")
-          chat-id (get chat "id")]
+    (let [{:id chat-id :type chat-type} (get message "chat")]
       (if (or (= "/add" text)
               (= "" (.trim (.slice text 4))))
-        (if (= "private" (get chat "type"))
+        (if (= "private" chat-type)
           (prompt env chat-id)
           (Response. "OK"))
         (if-let [sender (get message "from")
                  user-id (get sender "id")]
-          (if (= "private" (get chat "type"))
+          (if (= "private" chat-type)
             (if-let [task-channel (telegram/channel (.slice text 4))]
               (.then
                (.catch
@@ -38,9 +37,9 @@
                     (db/all
                      "INSERT OR IGNORE INTO tasks (telegram_user_id, text, cursor) VALUES (?1, ?2, ?3) RETURNING id"
                      [user-id (get task-channel "text") (latest-id ids)])
-                    (fn [result]
+                    (fn [{:results results}]
                       (.then
-                       (telegram/send-message env chat-id (if (= 0 (count (get result "results"))) "Канал уже добавлен." "Канал добавлен."))
+                       (telegram/send-message env chat-id (if (= 0 (count results)) "Канал уже добавлен." "Канал добавлен."))
                        (fn [] (Response. "OK")))))
                    (.then
                     (telegram/send-message env chat-id "Не удалось прочитать Telegram-канал.")

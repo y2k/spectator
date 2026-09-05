@@ -22,8 +22,8 @@
              (db/all
               "DELETE FROM tasks WHERE id = (SELECT id FROM tasks WHERE telegram_user_id = ?1 ORDER BY id LIMIT 1 OFFSET ?2) AND telegram_user_id = ?1 RETURNING id"
               [user-id (- task-number 1)])
-             (fn [result]
+             (fn [{:results results}]
                (.then
-                (telegram/send-message env chat-id (if (= 0 (count (get result "results"))) "Задача не найдена." "Задача удалена."))
+                (telegram/send-message env chat-id (if (= 0 (count results)) "Задача не найдена." "Задача удалена."))
                 (fn [] (Response. "OK")))))
             (usage env chat-id)))))))

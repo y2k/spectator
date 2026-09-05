@@ -162,11 +162,11 @@
            (.scheduled (.getWorker server) {:cron "* * * * *"})
            (fn []
              (let [logs (.getLogs server)
-                   log (.find logs
-                              (fn [log]
-                                (and (= "log" (get log "level"))
-                                     (.includes (get log "message") "scheduled_effects"))))
-                   effects (get (JSON.parse (get log "message")) "effects")]
+                   {:message message} (.find logs
+                                             (fn [{:level level :message message}]
+                                               (and (= "log" level)
+                                                    (.includes message "scheduled_effects"))))
+                   {:effects effects} (JSON.parse message)]
                (assert/deepStrictEqual
                 effects
                 (JSON.parse
@@ -198,7 +198,7 @@
                    {:type "d1.bind" :params [31 3]}
                    {:type "fetch" :url "https://t.me/s/quiet?after=40" :props {}}])))
                (assert/equal
-                (count (.filter logs (fn [log] (= "error" (get log "level")))))
+                (count (.filter logs (fn [{:level level}] (= "error" level))))
                 3))))))
 
 (t/test "worker lists tasks for the Telegram user"

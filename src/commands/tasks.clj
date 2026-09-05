@@ -11,10 +11,10 @@
      (db/all
       "SELECT text FROM tasks WHERE telegram_user_id = ?1 ORDER BY id"
       [user-id])
-     (fn [result]
+     (fn [{:results results}]
        (let [tasks (.join
-                    (.map (get result "results")
-                          (fn [task index] (str (+ index 1) ". " (get task "text"))))
+                    (.map results
+                          (fn [{:text task-text} index] (str (+ index 1) ". " task-text)))
                     "\n")]
          (.then
           (telegram/send-message env (get (get message "chat") "id") (if (= "" tasks) "Задач пока нет." tasks))

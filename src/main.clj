@@ -6,36 +6,37 @@
   (:require [db :as db])
   (:require [telegram :as telegram]))
 
-(defn- log-task-error [task stage error]
+(defn- log-task-error [task-id stage error]
   (globalThis.console.error
    (JSON.stringify {:event "task_error"
-                    :task_id (get task "id")
+                    :task_id task-id
                     :stage stage
                     :error (str error)})))
 
-(defn- update-cursor [task post-id]
+(defn- update-cursor [task-id post-id]
   (db/run
    "UPDATE tasks SET cursor = ?1 WHERE id = ?2 AND cursor < ?1"
-   [post-id (get task "id")]))
+   [post-id task-id]))
 
-(defn- notify-post [env task post-id]
+(defn- notify-post [env {:id task-id :telegram_user_id user-id :text text} post-id]
   (.then
    (.catch
     (telegram/send-message
      env
-     (get task "telegram_user_id")
-     (str (get task "text") (if (.endsWith (get task "text") "/") "" "/") post-id))
+     user-id
+     (str text (if (.endsWith text "/") "" "/") post-id))
     (fn [error]
-      (log-task-error task "send" error)))
-   (fn [] (update-cursor task post-id))))
+      (log-task-error task-id "send" error)))
+   (fn [] (update-cursor task-id post-id))))
 
 (defn- process-task [env task]
-  (let [task-channel (telegram/channel (get task "text"))]
+  (let [{:id task-id :text text :cursor cursor} task
+        task-channel (telegram/channel text)]
     (.then
-     (telegram/fetch-post-ids (str (telegram/preview-url task-channel) "?after=" (get task "cursor")) false)
+     (telegram/fetch-post-ids (str (telegram/preview-url task-channel) "?after=" cursor) false)
      (fn [ids]
        (let [new-ids (.sort
-                      (.filter ids (fn [id] (> id (get task "cursor"))))
+                      (.filter ids (fn [id] (> id cursor)))
                       (fn [left right] (- left right)))]
          (reduce
           (fn [promise post-id]
@@ -49,7 +50,7 @@
    (db/all
     "SELECT id, telegram_user_id, text, cursor FROM tasks ORDER BY id"
     [])
-   (fn [result]
+   (fn [{:results results}]
      (reduce
       (fn [promise task]
         (.then
@@ -57,9 +58,9 @@
          (fn []
            (.catch
             (process-task env task)
-            (fn [error] (log-task-error task "process" error))))))
+            (fn [error] (log-task-error (get task "id") "process" error))))))
       (.resolve Promise nil)
-      (get result "results")))))
+      results))))
 
 (defn handle-fetch [request env]
   (if (= "POST" (get request "method"))
