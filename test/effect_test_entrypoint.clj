@@ -3,19 +3,19 @@
   (:require [main :as main])
   (:require [telegram :as telegram]))
 
-(defn- database [effects]
+(defn- database [effects tasks]
   {:prepare (fn [sql]
               (.push effects {:type "d1.prepare" :sql sql})
               {:all (fn []
                       (.resolve
                        Promise
                        {:results (if (.startsWith sql "SELECT id, telegram_user_id")
-                                   [{:id 1 :telegram_user_id "user-1" :text "https://t.me/serbia" :cursor 10 :selection_rule nil}
-                                    {:id 2 :telegram_user_id "user-2" :text "https://t.me/broken" :cursor 20 :selection_rule nil}
-                                    {:id 3 :telegram_user_id "user-3" :text "https://t.me/cursorfail" :cursor 30 :selection_rule nil}
-                                    {:id 4 :telegram_user_id "user-4" :text "https://t.me/quiet" :cursor 40 :selection_rule "+C++ +.NET +@account +мат +AT&T +© -реклама"}
-                                    {:id 5 :telegram_user_id "user-5" :text "https://t.me/prohibited" :cursor 50 :selection_rule "-реклама"}
-                                    {:id 6 :telegram_user_id "user-6" :text "https://t.me/required" :cursor 60 :selection_rule "+clojure"}]
+                                   (or tasks [{:id 1 :telegram_user_id "user-1" :text "https://t.me/serbia" :cursor 10 :selection_rule nil}
+                                              {:id 2 :telegram_user_id "user-2" :text "https://t.me/broken" :cursor 20 :selection_rule nil}
+                                              {:id 3 :telegram_user_id "user-3" :text "https://t.me/cursorfail" :cursor 30 :selection_rule nil}
+                                              {:id 4 :telegram_user_id "user-4" :text "https://t.me/quiet" :cursor 40 :selection_rule "+C++ +.NET +@account +мат +AT&T +© -реклама"}
+                                              {:id 5 :telegram_user_id "user-5" :text "https://t.me/prohibited" :cursor 50 :selection_rule "-реклама"}
+                                              {:id 6 :telegram_user_id "user-6" :text "https://t.me/required" :cursor 60 :selection_rule "+clojure"}])
                                    [])}))
                :bind (fn [first second third]
                        (.push effects {:type "d1.bind"
@@ -84,32 +84,50 @@
           (JSON.stringify {:ok (if (= "https://t.me/serbia/11" (get body "text")) false true)})
           {:headers {"content-type" "application/json"}}))))))
 
+(defn- selection-response [request env]
+  (.then (.json request)
+         (fn [{:rule rule :html html}]
+           (let [effects (Array.)]
+             (telegram/with-fetch
+               (fn [url props]
+                 (if (.startsWith url "https://t.me/s/")
+                   (.resolve Promise (Response. html))
+                   ((external-fetch effects) url props)))
+               (fn []
+                 (db/with-db
+                   (database effects [{:id 7 :telegram_user_id "owner" :text "https://t.me/selection" :cursor 10 :selection_rule rule}])
+                   (fn []
+                     (.then (main/handle-scheduled env)
+                            (fn [] (Response. (JSON.stringify effects))))))))))))
+
 (export-default
  :fetch (fn [request env ctx]
-          (let [effects (Array.)]
-            (telegram/with_fetch
-             (external-fetch effects)
-             (fn []
-               (db/with_db
-                (database effects)
-                (fn []
-                  (.then
-                   (.resolve Promise (main/handle-fetch request env))
-                   (fn [response]
-                     (.then
-                      (.text response)
-                      (fn [body]
-                        (Response.
-                         (JSON.stringify {:effects effects
-                                          :response body})
-                         {:headers {"content-type" "application/json"}})))))))))))
+          (if (.endsWith (get request "url") "/selection")
+            (selection-response request env)
+            (let [effects (Array.)]
+              (telegram/with_fetch
+               (external-fetch effects)
+               (fn []
+                 (db/with_db
+                  (database effects nil)
+                  (fn []
+                    (.then
+                     (.resolve Promise (main/handle-fetch request env))
+                     (fn [response]
+                       (.then
+                        (.text response)
+                        (fn [body]
+                          (Response.
+                           (JSON.stringify {:effects effects
+                                            :response body})
+                           {:headers {"content-type" "application/json"}}))))))))))))
  :scheduled (fn [controller env ctx]
               (let [effects (Array.)]
                 (telegram/with_fetch
                  (external-fetch effects)
                  (fn []
                    (db/with_db
-                    (database effects)
+                    (database effects nil)
                     (fn []
                       (.then
                        (main/handle-scheduled env)

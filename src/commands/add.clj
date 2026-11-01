@@ -51,3 +51,9 @@
                (telegram/send-message env chat-id "Поддерживается только ссылка вида https://t.me/<канал>.")
                (fn [] (Response. "OK"))))
             (Response. "OK")))))))
+
+(def command
+  {:name "add"
+   :args "https://t.me/<канал>"
+   :description "добавить канал"
+   :handler handle})

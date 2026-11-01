@@ -32,7 +32,7 @@
                     (.replaceAll "&amp;" "&"))]
     (if (.test (RegExp. "&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]+);" "i") decoded)
       nil
-      decoded)))
+      (.trim decoded))))
 
 (defn- parse-posts [response]
   (let [posts (Array.)
@@ -50,6 +50,10 @@
                                         (.push posts post)))})
                      (.on "[data-post] .js-message_text"
                           {:text (fn [chunk] (append-text (get chunk "text")))})
+                     (.on "[data-post] .tgme_widget_message_poll_question"
+                          {:text (fn [chunk] (append-text (get chunk "text")))})
+                     (.on "[data-post] .tgme_widget_message_poll_question br"
+                          {:element (fn [element] (append-text " "))})
                      (.on "[data-post] .js-message_text br"
                           {:element (fn [element] (append-text " "))}))]
     (.then
@@ -58,7 +62,7 @@
        (.forEach posts
                  (fn [post]
                    (if-let [text (get post "text")]
-                     (Reflect.set post "text" (decode-entities (.trim text))))))
+                     (Reflect.set post "text" (decode-entities text)))))
        posts))))
 
 (defn fetch-posts [url require-post]

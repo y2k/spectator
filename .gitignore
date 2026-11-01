@@ -7,3 +7,4 @@
 /.wrangler/bin/
 /opencode.json
 node_modules/
+/.opencode/skills

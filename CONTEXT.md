@@ -17,7 +17,7 @@ A public Telegram channel link and optional Selection Rule stored by the bot and
 _Avoid_: text task, team task, shared task, Channel Task
 
 **Selection Rule**:
-A Task-specific set of required and prohibited keywords matched case-insensitively against a Channel Post's text or caption. Keywords may contain punctuation; surrounding punctuation in the post is ignored. A post matches when it contains any required keyword (or none are configured) and no prohibited keyword. Prohibited keywords take precedence. Posts without analysable text match; Tasks without a Selection Rule match every post.
+A Task-specific set of required and prohibited keywords matched case-insensitively against a Channel Post's text, caption, or poll question. Poll answer options, voting statistics, and reactions are not analysed. Keywords may contain punctuation; surrounding punctuation in the post is ignored. A post matches when it contains any required keyword (or none are configured) and no prohibited keyword. Prohibited keywords take precedence. With a Selection Rule, posts without analysable nonempty text do not match, including rules with only prohibited keywords. Tasks without a Selection Rule match every post.
 _Avoid_: global filter, channel filter
 
 **Task owner**:

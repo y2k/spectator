@@ -1,9 +1,5 @@
 (ns main
-  (:require [commands.add :as add])
-  (:require [commands.delete :as delete_cmd])
-  (:require [commands.filter :as filter_cmd])
-  (:require [commands.start :as start])
-  (:require [commands.tasks :as tasks])
+  (:require [commands.core :as commands])
   (:require [db :as db])
   (:require [telegram :as telegram]))
 
@@ -27,8 +23,10 @@
    text))
 
 (defn- matches-selection-rule [selection-rule text]
-  (if (or (not selection-rule) (not text) (= "" text))
-    true
+  (cond
+    (not selection-rule) true
+    (or (not text) (= "" text)) false
+    :else
     (let [keywords (.split selection-rule " ")
           required (-> keywords
                        (.filter (fn [keyword] (.startsWith keyword "+")))
@@ -93,13 +91,7 @@
       (.then
        (.json request)
        (fn [update]
-         (let [message (get update "message")]
-           (or (start/handle env message)
-               (delete_cmd/handle env message)
-               (filter_cmd/handle env message)
-               (add/handle env message)
-               (tasks/handle env message)
-               (Response. "OK")))))
+          (commands/handle env (get update "message"))))
       (Response. "Unauthorized" {:status 401}))
     (Response. "OK")))
 

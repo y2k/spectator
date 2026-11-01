@@ -1,0 +1,24 @@
+schema: spec-driven
+
+context: |
+  Language: write proposals, designs, tasks and all other artifacts in Russian.
+  Only spec files (openspec/specs/**, delta specs in changes/*/specs/**) are written in English.
+  Keep technical terms, code identifiers, file paths, RFC 2119 keywords (SHALL/MUST) and scenario headers in English.
+
+rules:
+  specs:
+    - Write specs in English only
+  proposal:
+    - Write in Russian
+  design:
+    - Write in Russian
+  tasks:
+    - Write in Russian
+
+operations:
+  apply:
+    guidance:
+      - Communicate and summarize in Russian
+  archive:
+    guidance:
+      - Communicate and summarize in Russian

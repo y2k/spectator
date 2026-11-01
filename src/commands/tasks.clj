@@ -21,3 +21,9 @@
          (.then
           (telegram/send-message env (get-in message [:chat :id]) (if (= "" tasks) "Задач пока нет." tasks))
           (fn [] (Response. "OK"))))))))
+
+(def command
+  {:name "tasks"
+   :args ""
+   :description "показать каналы и их номера"
+   :handler handle})

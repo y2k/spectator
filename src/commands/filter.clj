@@ -43,3 +43,9 @@
                      :else "Фильтр сохранён."))
                   (fn [] (Response. "OK"))))))
             (usage env chat-id)))))))
+
+(def command
+  {:name "filter"
+   :args "ID +слово | -слово... | номер off"
+   :description "Настроить фильтр: + требует слово, - исключает; off отключает фильтр."
+   :handler handle})

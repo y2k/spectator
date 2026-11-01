@@ -26,3 +26,9 @@
                 (telegram/send-message env chat-id (if (= 0 (count results)) "Задача не найдена." "Задача удалена."))
                 (fn [] (Response. "OK")))))
             (usage env chat-id)))))))
+
+(def command
+  {:name "delete"
+   :args "ID"
+   :description "удалить канал по номеру из списка"
+   :handler handle})

@@ -20,7 +20,8 @@ Create issues for the `l2yk` compiler in https://github.com/y2k/language.
 
 ### Issue tracker
 
-Issues and specs live in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+Issues live in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+Specifications live in `openspec/specs/`; active changes live in `openspec/changes/`.
 
 ### Triage labels
 
