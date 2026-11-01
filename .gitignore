@@ -5,6 +5,7 @@
 /.vscode/
 /.wrangler/.wrangler/
 /.wrangler/bin/
+/test/.wrangler/
 /opencode.json
 node_modules/
 /.opencode/skills

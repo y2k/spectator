@@ -78,13 +78,14 @@
             (.reject Promise (Error. "Telegram preview has no posts")))))
        (.reject Promise (Error. "Telegram preview request failed"))))))
 
-(defn send-message [env chat-id text]
+(defn send-message [env chat-id message]
   (.then
    (fetch!
     (str "https://api.telegram.org/bot" (get env "TELEGRAM_BOT_TOKEN") "/sendMessage")
     {:method "POST"
      :headers {"content-type" "application/json"}
-     :body (JSON.stringify {:chat_id chat-id :text text})})
+     :body (JSON.stringify (merge {:chat_id chat-id}
+                                  (if (string? message) {:text message} message)))})
    (fn [response]
      (if (and response (get response "ok"))
        (.then

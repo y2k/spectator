@@ -122,6 +122,7 @@
                                             :response body})
                            {:headers {"content-type" "application/json"}}))))))))))))
  :scheduled (fn [controller env ctx]
+              (globalThis.console.log (JSON.stringify {:event "scheduled_started"}))
               (let [effects (Array.)]
                 (telegram/with_fetch
                  (external-fetch effects)

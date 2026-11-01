@@ -13,6 +13,10 @@ build:
 	@ cp $$LY2K_PACKAGES_DIR/prelude/1.0.0/js/language_runtime.js $(BIN_DIR)/src
 	@ cp $$LY2K_PACKAGES_DIR/prelude/1.0.0/js/language_runtime.js $(BIN_DIR)/test
 
+.PHONY: deploy
+deploy: test
+	@ cd $(WRANGLER_DIR) && wrangler deploy
+
 .PHONY: clean
 clean:
 	@ rm -rf $(BIN_DIR)

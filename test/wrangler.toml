@@ -1,0 +1,7 @@
+name = "spectator-effect-test"
+main = "../.wrangler/bin/test/effect_test_entrypoint.js"
+compatibility_date = "2026-08-24"
+
+[vars]
+TELEGRAM_BOT_TOKEN = "test-token"
+TELEGRAM_WEBHOOK_SECRET = "test-secret"

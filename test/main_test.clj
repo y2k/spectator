@@ -1,19 +1,112 @@
 (ns main-test
+  (:require ["../src/commands/core.js" :as commands])
   (:require ["node:assert/strict" :as assert])
   (:require ["node:test" :as t])
-  (:require ["wrangler" :as wrangler]))
-
-(def- server
-  (wrangler/createTestHarness
-   {:root "."
-    :workers [{:config {:name "spectator-effect-test"
-                        :main "bin/test/effect_test_entrypoint.js"
-                        :compatibility_date "2026-08-24"}
-               :vars {"TELEGRAM_BOT_TOKEN" "test-token"
-                      "TELEGRAM_WEBHOOK_SECRET" "test-secret"}}]}))
+  (:require ["../../../test/server.js" :as server]))
 
 (t/before (fn [] (.listen server)))
 (t/after (fn [] (.close server)))
+
+(.forEach
+ [["  (tasks) \n" ["tasks" []]]
+  ["( delete\t2 )" ["delete" [2]]]
+  ["(filter 12 \"+clojure\" \"-реклама\")" ["filter" [12 "+clojure" "-реклама"]]]
+  ["(add \"a( b )\\\"c\\\\d\")" ["add" ["a( b )\"c\\d"]]]]
+ (fn [[text expected]]
+   (t/test (str "parse literal command: " text)
+           (fn []
+             (let [parsed (commands/parse-command text)]
+               (assert/deepStrictEqual [(:name parsed) (:args parsed)] expected))))))
+
+(.forEach
+ ["(add \"unfinished)" "(add \"channel\"" "(delete (+ 1 1))"
+  "(delete 1) (delete 2)" "(delete 1) extra" "(add \"bad\\q\")"
+  "(add channel)" "(tasks))" "()" "(filter 2 \"+a\"\"-b\")"
+  "(delete [2])" "(delete '2)" "(delete 1.5)" "(tasks ;comment\n)"]
+ (fn [text]
+   (t/test (str "reject malformed command: " text)
+           (fn [] (assert/equal (commands/parse-command text) nil)))))
+
+(defn- command-effects [message]
+  (.then (.fetch server "/"
+                 {:method "POST"
+                  :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
+                  :body (JSON.stringify {:message message})})
+         (fn [response]
+           (.then (.json response)
+                  (fn [body]
+                    (assert/equal (:response body) "OK")
+                    (:effects body))))))
+
+(.forEach
+ [{} {"X-Telegram-Bot-Api-Secret-Token" "wrong-secret"}]
+ (fn [headers]
+   (t/test (str "unauthorized s-expression has no effects: " (JSON.stringify headers))
+           (fn []
+             (.then (.fetch server "/"
+                            {:method "POST" :headers headers
+                             :body (JSON.stringify {:message {:text "(delete 2)"
+                                                              :from {:id "user-1"}
+                                                              :chat {:id "chat-1"}}})})
+                    (fn [response]
+                      (.then (.json response)
+                             (fn [body]
+                               (assert/equal (:response body) "Unauthorized")
+                               (assert/deepStrictEqual (:effects body) [])))))))))
+
+(.forEach
+ ["(unknown)" "(tasks 1)" "(start 1)" "(add)" "(add 2)"
+  "(add \"a\" \"b\")" "(delete)" "(delete \"2\")" "(delete 0)"
+  "(delete 1 2)" "(filter)" "(filter 2)" "(filter \"2\" \"off\")"
+  "(filter 0 \"off\")" "(filter 2 3)" "(delete (+ 1 1))"
+  "(delete 1) (delete 2)" "(delete 1) extra" "(add \"channel\""
+  "(filter 2 \"\")" "(filter 2 \"+\")" "(filter 2 \"-\")"
+  "(filter 2 \"+two words\")" "(filter 2 \"+word\tother\")"
+  "(filter 2 \"+word\nother\")" "(filter 2 \"+word other\")"
+  "(filter 2 \"off\" \"+clojure\")" "(filter 2 \"+clojure\" \"off\")"]
+ (fn [text]
+   (t/test (str "invalid command only sends guidance: " text)
+           (fn []
+             (.then (command-effects {:text text :from {:id "user-1"}
+                                      :chat {:id "chat-1" :type "private"}})
+                    (fn [effects]
+                      (assert/equal (count effects) 1)
+                      (assert/equal (get-in effects [0 :url])
+                                    "https://api.telegram.org/bottest-token/sendMessage")
+                      (let [reply (JSON.parse (get-in effects [0 :props :body]))]
+                        (assert/equal (:chat_id reply) "chat-1")
+                        (assert/ok (.includes (:text reply) "("))
+                        (assert/equal (.includes (:text reply) "/delete") false))))))))
+
+(.forEach
+ [["(filter 2 \"+clojure\" \"-реклама\")" "+clojure -реклама"]
+  ["(filter 2 \"+a\\\"b\" \"-c\\\\d\" \"+(x)\")" "+a\"b -c\\d +(x)"]]
+ (fn [[text rule]]
+   (t/test (str "adapter preserves decoded keywords: " text)
+           (fn []
+             (.then (command-effects {:text text :from {:id "user-1"}
+                                      :chat {:id "chat-1"}})
+                    (fn [effects]
+                      (assert/deepStrictEqual (get-in effects [1 :params])
+                                              [rule "user-1" 1])))))))
+
+(.forEach
+ ["(add \"https://t.me/serbia\")" "(tasks)" "(delete 2)" "(filter 2 \"off\")"]
+ (fn [text]
+   (t/test (str "task command requires sender identity: " text)
+           (fn []
+             (.then (command-effects {:text text :chat {:id "chat-1" :type "private"}})
+                    (fn [effects] (assert/deepStrictEqual effects [])))))))
+
+(t/test "Telegram Start and s-expression start send identical help"
+        (fn []
+          (.then (Promise.all
+                  (map (fn [text]
+                         (command-effects {:text text :chat {:id "chat-1"}}))
+                       ["/start" "(start)"]))
+                 (fn [[telegram-start sexpr-start]]
+                   (assert/deepStrictEqual sexpr-start telegram-start)
+                   (assert/equal (count sexpr-start) 1)))))
 
 (defn- check-selection [rule html notifications cursors]
   (.then (.fetch server "/selection"
@@ -95,7 +188,7 @@
             {:chat_id "owner" :text "https://t.me/selection/14"}]
            [[11 7] [12 7] [13 7] [14 7] [15 7]])))
 
-(t/test "worker sends help for /start"
+(t/test "worker sends Markdown code formatting for /start help"
         (fn []
           (.then
            (.fetch server "/"
@@ -117,15 +210,17 @@
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "test-chat"
                                                     :text "Доступные команды:
-/start - показать справку
-/add https://t.me/<канал> - добавить канал
-/tasks - показать каналы и их номера
-/delete ID - удалить канал по номеру из списка
-/filter ID +слово | -слово... | номер off - Настроить фильтр: + требует слово, - исключает; off отключает фильтр."})}}])))))))))
+`(start)` - показать справку
+`(add \"https://t.me/<канал>\")` - добавить канал
+`(tasks)` - показать каналы и их номера
+`(delete 2)` - удалить канал по номеру из списка
+`(filter 2 \"+слово\" \"-слово\")` или `(filter 2 \"off\")` - Настроить фильтр: + требует слово, - исключает; off отключает фильтр."
+                                                    :parse_mode "Markdown"})}}])))))))))
 
 (.forEach
- ["/tasks extra" "/start extra" "/tasksx" "/unknown" "hello" "(tasks)"
-  " /tasks" "/tasks@bot" "/delete\t2" nil]
+ ["/tasks extra" "/start extra" "/tasksx" "/unknown" "hello"
+  " /tasks" "/tasks@bot" "/delete\t2" nil " /start" "/start "
+  "/add https://t.me/channel" "/tasks" "/delete 2" "/filter 2 off"]
  (fn [text]
    (t/test (str "worker ignores unsupported command: " text)
            (fn []
@@ -147,7 +242,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/add https://t.me/Serbia"
+                    :body (JSON.stringify {:message {:text "(add \"https://t.me/Serbia\")"
                                                      :chat {:id "chat-1" :type "private"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -177,7 +272,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/add Buy milk"
+                    :body (JSON.stringify {:message {:text "(add \"Buy milk\")"
                                                      :chat {:id "chat-1" :type "private"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -201,7 +296,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/add https://t.me/broken"
+                    :body (JSON.stringify {:message {:text "(add \"https://t.me/broken\")"
                                                      :chat {:id "chat-1" :type "private"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -220,13 +315,13 @@
                              :body (JSON.stringify {:chat_id "chat-1"
                                                     :text "Не удалось прочитать Telegram-канал."})}}])))))))))
 
-(t/test "worker ignores /add outside a private chat"
+(t/test "worker ignores add outside a private chat"
         (fn []
           (.then
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/add https://t.me/serbia"
+                    :body (JSON.stringify {:message {:text "(add \"https://t.me/serbia\")"
                                                      :chat {:id "group-1" :type "group"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -241,7 +336,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/add https://t.me/Serbia"
+                    :body (JSON.stringify {:message {:text "(add \"https://t.me/Serbia\")"
                                                      :chat {:id "duplicate-user" :type "private"}
                                                      :from {:id "duplicate-user"}}})})
            (fn [response]
@@ -260,7 +355,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/filter 2 -реклама"
+                    :body (JSON.stringify {:message {:text "(filter 2 \"-реклама\")"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -287,7 +382,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/filter 2 off"
+                    :body (JSON.stringify {:message {:text "(filter 2 \"off\")"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -314,7 +409,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/filter 2 clojure"
+                    :body (JSON.stringify {:message {:text "(filter 2 \"clojure\")"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -331,7 +426,7 @@
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify
                                     {:chat_id "chat-1"
-                                     :text "Использование: /filter <номер> +нужное -запрещённое или /filter <номер> off"})}}])))))))))
+                                     :text "Использование: (filter 2 \"+слово\" \"-слово\") или (filter 2 \"off\")"})}}])))))))))
 
 (t/test "worker rejects an invalid task number for a selection rule"
         (fn []
@@ -339,7 +434,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/filter second +clojure"
+                    :body (JSON.stringify {:message {:text "(filter \"second\" \"+clojure\")"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -356,7 +451,7 @@
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify
                                     {:chat_id "chat-1"
-                                     :text "Использование: /filter <номер> +нужное -запрещённое или /filter <номер> off"})}}])))))))))
+                                     :text "Использование: (filter 2 \"+слово\" \"-слово\") или (filter 2 \"off\")"})}}])))))))))
 
 (t/test "worker reports a missing task for a selection rule"
         (fn []
@@ -364,7 +459,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/filter 1 +clojure"
+                    :body (JSON.stringify {:message {:text "(filter 1 \"+clojure\")"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "empty-user"}}})})
            (fn [response]
@@ -387,16 +482,10 @@
 
 (t/test "scheduled handler advances ordered posts and isolates failures"
         (fn []
-          (.clearLogs server)
           (.then
-           (.scheduled (.getWorker server) {:cron "* * * * *"})
-           (fn []
-             (let [logs (.getLogs server)
-                   {:message message} (.find logs
-                                             (fn [{:level level :message message}]
-                                               (and (= "log" level)
-                                                    (.includes message "scheduled_effects"))))
-                   {:effects effects} (JSON.parse message)]
+           (.scheduled server)
+           (fn [{:effects effects :errors errors}]
+             (do
                (assert/deepStrictEqual
                 effects
                 (JSON.parse
@@ -491,7 +580,7 @@
                    {:type "d1.prepare" :sql "UPDATE tasks SET cursor = ?1 WHERE id = ?2 AND cursor < ?1"}
                    {:type "d1.bind" :params [62 6]}])))
                (assert/equal
-                (count (.filter logs (fn [{:level level}] (= "error" level))))
+                (count errors)
                 3))))))
 
 (t/test "worker lists tasks for the Telegram user"
@@ -500,7 +589,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/tasks"
+                    :body (JSON.stringify {:message {:text "  (tasks)  "
                                                      :chat {:id "chat-1"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -527,7 +616,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/delete 2"
+                    :body (JSON.stringify {:message {:text "(delete 2)"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -554,7 +643,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/delete 1"
+                    :body (JSON.stringify {:message {:text "(delete 1)"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "empty-user"}}})})
            (fn [response]
@@ -575,13 +664,13 @@
                              :body (JSON.stringify {:chat_id "chat-1"
                                                     :text "Задача не найдена."})}}])))))))))
 
-(t/test "worker explains how to use /delete without a task number"
+(t/test "worker explains how to use delete without a task number"
         (fn []
           (.then
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/delete"
+                    :body (JSON.stringify {:message {:text "(delete)"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -597,15 +686,15 @@
                      :props {:method "POST"
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "chat-1"
-                                                    :text "Использование: /delete <номер>"})}}])))))))))
+                                                    :text "Использование: (delete 2)"})}}])))))))))
 
-(t/test "worker explains how to use /delete with an invalid task number"
+(t/test "worker explains how to use delete with an invalid task number"
         (fn []
           (.then
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/delete second"
+                    :body (JSON.stringify {:message {:text "(delete \"second\")"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -621,15 +710,15 @@
                      :props {:method "POST"
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "chat-1"
-                                                    :text "Использование: /delete <номер>"})}}])))))))))
+                                                    :text "Использование: (delete 2)"})}}])))))))))
 
-(t/test "worker explains how to use /delete with zero"
+(t/test "worker explains how to use delete with zero"
         (fn []
           (.then
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/delete 0"
+                    :body (JSON.stringify {:message {:text "(delete 0)"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -645,15 +734,15 @@
                      :props {:method "POST"
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "chat-1"
-                                                    :text "Использование: /delete <номер>"})}}])))))))))
+                                                    :text "Использование: (delete 2)"})}}])))))))))
 
-(t/test "worker explains how to use empty /add"
+(t/test "worker explains how to use empty add"
         (fn []
           (.then
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/add"
+                    :body (JSON.stringify {:message {:text "(add \"\")"
                                                      :chat {:id "chat-1" :type "private"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -669,15 +758,15 @@
                      :props {:method "POST"
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "chat-1"
-                                                    :text "Укажите ссылку: /add https://t.me/<канал>"})}}])))))))))
+                                                    :text "Использование: (add \"https://t.me/<канал>\")"})}}])))))))))
 
-(t/test "worker does not store whitespace-only /add"
+(t/test "worker does not store whitespace-only add"
         (fn []
           (.then
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/add   "
+                    :body (JSON.stringify {:message {:text "(add \"   \")"
                                                      :chat {:id "chat-1" :type "private"}
                                                      :from {:id "user-1"}}})})
            (fn [response]
@@ -693,7 +782,7 @@
                      :props {:method "POST"
                              :headers {"content-type" "application/json"}
                              :body (JSON.stringify {:chat_id "chat-1"
-                                                    :text "Укажите ссылку: /add https://t.me/<канал>"})}}])))))))))
+                                                    :text "Использование: (add \"https://t.me/<канал>\")"})}}])))))))))
 
 (t/test "worker reports no tasks for an empty list"
         (fn []
@@ -701,7 +790,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/tasks"
+                    :body (JSON.stringify {:message {:text "(tasks)"
                                                      :chat {:id "chat-1"}
                                                      :from {:id "empty-user"}}})})
            (fn [response]
@@ -743,7 +832,7 @@
            (.fetch server "/"
                    {:method "POST"
                     :headers {"X-Telegram-Bot-Api-Secret-Token" "test-secret"}
-                    :body (JSON.stringify {:message {:text "/add Buy milk"
+                    :body (JSON.stringify {:message {:text "(add \"Buy milk\")"
                                                      :chat {:id "chat-1"}}})})
            (fn [response]
              (.then
